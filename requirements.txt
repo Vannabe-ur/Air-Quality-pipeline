@@ -1,0 +1,8 @@
+requests
+pandas
+pymysql
+apache-airflow-providers-apache-spark
+pyspark==3.5.6
+streamlit
+sqlalchemy
+plotly

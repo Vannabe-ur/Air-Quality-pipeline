@@ -1,0 +1,82 @@
+x-airflow-common: &airflow-common
+  image: air-quality-airflow:2.8.1
+  env_file: .env
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW_CONN_SPARK_DEFAULT: spark://spark%3A%2F%2Fspark-master:7077
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./spark_jobs:/opt/airflow/spark_jobs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # Airflow metadata database (internal use only)
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  # YOUR data database
+  mysql:
+    image: mysql:8.0
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+
+  airflow-webserver:
+    <<: *airflow-common
+    build: .
+    command: webserver
+    ports:
+      - "8080:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com"
+
+  spark-master:
+    image: bitnamilegacy/spark:3.5.6
+    environment:
+      SPARK_MODE: master
+    volumes:
+      - ./spark_jobs:/opt/airflow/spark_jobs
+    ports:
+      - "8081:8080"   # Spark UI
+      - "7077:7077"
+
+  spark-worker:
+    image: bitnamilegacy/spark:3.5.6
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+    volumes:
+      - ./spark_jobs:/opt/airflow/spark_jobs
+    depends_on:
+      - spark-master
