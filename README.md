@@ -50,7 +50,6 @@ Air quality data gives us real-world measurements: PM2.5, PM10, CO, NO2, O3 — 
 # Save your token, you'll put it in .env
 ```
 
-c
 ```
 mkdir air_quality_etl && cd air_quality_etl
 mkdir -p dags spark_jobs scripts streamlit_app
@@ -70,7 +69,7 @@ MYSQL_DB=air_quality
 This is the heart of the setup. It defines all your services.
 **Why each service?**
 - `postgres` → Airflow stores its own metadata (DAG runs, task logs) here
-- `mysql` → YOUR data lives here (air quality readings)
+- `mysql` → data lives here (air quality readings)
 - `airflow-webserver` → The browser UI at localhost:8080
 - `airflow-scheduler` → Watches the clock and triggers DAG runs
 - `spark-master/worker` → Distributed compute engine for transformation
@@ -90,11 +89,11 @@ Create `dags/air_quality_dag.py`for processing:
 Create `spark_jobs/transform.py`
 **Why Spark here?**
 - Spark handles data cleaning in a distributed, fault-tolerant way
-- It can scale to millions of rows (not just 5 cities — imagine 5000)
+- It can scale to millions of rows (not just few cities — imagine 5000)
 - JDBC connector writes directly to MySQL
 
 #### Step 8: Streamlit App
-Create `streamlit_app/dashboard.py` 
+Create `streamlit_app/app.py` 
 For interactive virtulization, testing the workflow whether it could process exact same data with the real website.
 
 #### Step 9: Launch Everything
