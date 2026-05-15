@@ -1,15 +1,18 @@
-from airflow import DAG 
+from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
-from datetime import datetime,  timedelta
+from datetime import datetime, timedelta
 import requests, json, os
-
+import sqlalchemy
 AQICN_TOKEN = os.getenv("AQICN_TOKEN")
 FEEDS = [
     feed.strip()
     for feed in os.getenv("AQICN_FEEDS", "@1451").split(",")
     if feed.strip()
 ]
+
+RAW_PATH   = "/opt/airflow/spark_jobs/raw_data.json"
+CLEAN_PATH = "/opt/airflow/spark_jobs/clean_data.json"
 
 def extract_air_quality(**context):
     """fetch air quality data from AQICN"""
@@ -49,6 +52,57 @@ def extract_air_quality(**context):
         json.dump(results, f)
 
     print(f"Extracted {len(results)} records")
+
+# Task: load
+def load_to_mysql(**context):
+    if not os.path.exists(CLEAN_PATH):
+        raise FileNotFoundError(
+            f"Clean data not found at {CLEAN_PATH}. "
+            "Did the Spark Transform task succeed?"
+        )
+ 
+    with open(CLEAN_PATH) as f:
+        records = json.load(f)
+ 
+    if not records:
+        raise ValueError("Clean data file is empty — nothing to load.")
+ 
+    # ── Build MySQL connection 
+    host     = os.getenv("MYSQL_HOST",     "mysql")
+    port     = os.getenv("MYSQL_PORT",     "3306")
+    db       = os.getenv("MYSQL_DB",       "air_quality")
+    user     = os.getenv("MYSQL_USER",     "etl_user")
+    password = os.getenv("MYSQL_PASSWORD", "etl_pass")
+ 
+    engine = sqlalchemy.create_engine(
+        f"mysql+pymysql://{user}:{password}@{host}:{port}/{db}"
+    )
+ 
+    # ── Upsert: skip duplicates by (city, recorded_at) 
+    insert_sql = sqlalchemy.text("""
+        INSERT IGNORE INTO air_quality
+            (city, station, aqi, pm25, pm10, o3, no2, co,
+             aqi_category, dominant_pollutant, recorded_at)
+        VALUES
+            (:city, :station, :aqi, :pm25, :pm10, :o3, :no2, :co,
+             :aqi_category, :dominant_pollutant, :recorded_at)
+    """)
+ 
+    loaded = 0
+    skipped = 0
+    with engine.begin() as conn:
+        for row in records:
+            result = conn.execute(insert_sql, row)
+            if result.rowcount:
+                loaded += 1
+            else:
+                skipped += 1
+ 
+    print(f"[LOAD] Inserted {loaded} rows, skipped {skipped} duplicates → {db}.air_quality")
+ 
+    # Clean up temp file so next run starts fresh
+    os.remove(CLEAN_PATH)
+    print(f"[LOAD] Removed {CLEAN_PATH}")
 
 default_args ={
     "owner": "airflow",
@@ -91,4 +145,10 @@ with DAG(
         packages="mysql:mysql-connector-java:8.0.33",
     )
 
-    extract >> transform # extract then transform (which also loads)
+    # Load data
+    load = PythonOperator(
+        task_id="load_to_mysql",
+        python_callable=load_to_mysql,
+    )
+
+    extract >> transform >>load 
