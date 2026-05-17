@@ -1,4 +1,8 @@
-# Air-Quality-pipeline
+# Air Quality ETL Pipeline
+A production-style data engineering pipeline that ingests real-time air quality data from the AQICN API, processes it through Apache Spark, and serves insights via an interactive Streamlit dashboard.
+
+Built with Apache Airflow for hourly orchestration, PySpark for data transformation and AQI categorization, MySQL for storage, and Docker Compose to run the full stack locally. The three-stage pipeline — Extract → Transform → Load — is fully observable through the Airflow UI with independent retry logic at each step.
+Stack: Python · Apache Airflow · Apache Spark · MySQL · Streamlit · Docker
 
 ### Workflow
 ```
